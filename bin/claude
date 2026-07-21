@@ -6,32 +6,71 @@
 # ever written to the shared config, so exiting leaves zero trace and every
 # other running (or future, flag-less) `claude` instance is unaffected.
 #
+# Also fills in session defaults (--model, --fallback-model, --effort) when
+# the caller hasn't already specified them, for every invocation, whether or
+# not --login_new is used.
+#
 # Usage:
 #   claude --login_new work            # first time: creates+uses an isolated
 #                                       # profile named "work"; run /login
 #                                       # inside it once to sign in there
 #   claude --login_new work            # later: reuses that profile's saved
 #                                       #        credentials automatically
-#   claude ...                         # no flag: behaves exactly as before
+#   claude --login_new work --plugins foo --effort high
+#                                       # any other flag/subcommand passes
+#                                       # through untouched; explicit flags
+#                                       # always win over the defaults below
+#   claude ...                         # no flag: still gets the defaults,
+#                                       # otherwise behaves exactly as before
 
 set -euo pipefail
 
 PROFILES_DIR="${CLAUDE_LOGIN_NEW_PROFILES_DIR:-$HOME/.claude-profiles}"
 
+DEFAULT_MODEL="${CLAUDE_LOGIN_NEW_DEFAULT_MODEL:-sonnet}"
+DEFAULT_FALLBACK_MODEL="${CLAUDE_LOGIN_NEW_DEFAULT_FALLBACK_MODEL:-fable}"
+DEFAULT_EFFORT="${CLAUDE_LOGIN_NEW_DEFAULT_EFFORT:-medium}"
+
+# Subcommands (as opposed to flags on the default interactive/print session)
+# don't accept --model/--fallback-model/--effort, so defaults must be skipped
+# whenever the first non-flag token is one of these.
+KNOWN_SUBCOMMANDS=(agents auth auto-mode doctor gateway install mcp plugin plugins project setup-token ultrareview update upgrade)
+
 find_real_claude() {
   local self
   self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  local self_resolved
+  self_resolved="$(readlink -f "$self")"
+
   local IFS=:
   for dir in $PATH; do
     local candidate="$dir/claude"
-    if [[ -x "$candidate" && "$candidate" != "$self" ]]; then
-      # Resolve symlinks so we never re-enter this same wrapper file.
-      if [[ "$(readlink -f "$candidate")" != "$(readlink -f "$self")" ]]; then
-        echo "$candidate"
-        return 0
-      fi
+    if [[ -x "$candidate" && "$(readlink -f "$candidate" 2>/dev/null)" != "$self_resolved" ]]; then
+      echo "$candidate"
+      return 0
     fi
   done
+  unset IFS
+
+  # PATH-based lookup can come up empty in shells that never sourced the
+  # profile that puts npm/nvm bin dirs on PATH (cron, some IDE terminals,
+  # su/sudo without -E, etc). Fall back to the common install locations so
+  # the wrapper still works from any folder in those environments too.
+  local fallback_globs=(
+    "$HOME"/.nvm/versions/node/*/bin/claude
+    "$HOME"/.local/share/pnpm/claude
+    "$HOME"/.volta/bin/claude
+    /usr/local/bin/claude
+    /usr/bin/claude
+  )
+  local candidate
+  for candidate in "${fallback_globs[@]}"; do
+    if [[ -x "$candidate" && "$(readlink -f "$candidate" 2>/dev/null)" != "$self_resolved" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
   return 1
 }
 
@@ -63,6 +102,41 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Detect a subcommand as the first non-flag token (e.g. `claude mcp add ...`);
+# session defaults don't apply to those.
+is_subcommand=false
+if [[ ${#args[@]} -gt 0 && "${args[0]}" != -* ]]; then
+  for cmd in "${KNOWN_SUBCOMMANDS[@]}"; do
+    if [[ "${args[0]}" == "$cmd" ]]; then
+      is_subcommand=true
+      break
+    fi
+  done
+fi
+
+final_args=("${args[@]}")
+if [[ "$is_subcommand" == false ]]; then
+  has_model=false
+  has_fallback=false
+  has_effort=false
+  for a in "${args[@]}"; do
+    case "$a" in
+      --model|--model=*) has_model=true ;;
+      --fallback-model|--fallback-model=*) has_fallback=true ;;
+      --effort|--effort=*) has_effort=true ;;
+    esac
+  done
+
+  defaults=()
+  [[ "$has_model" == true ]] || defaults+=(--model "$DEFAULT_MODEL")
+  [[ "$has_fallback" == true ]] || defaults+=(--fallback-model "$DEFAULT_FALLBACK_MODEL")
+  [[ "$has_effort" == true ]] || defaults+=(--effort "$DEFAULT_EFFORT")
+
+  # Defaults first, caller's own args last, so an explicit flag always wins
+  # if the has_* detection above ever misses a form.
+  final_args=("${defaults[@]}" "${args[@]}")
+fi
+
 if [[ -n "$login_new" ]]; then
   if [[ ! "$login_new" =~ ^[A-Za-z0-9._-]+$ ]]; then
     echo "claude: invalid profile name '$login_new' (use letters, numbers, ., _, -)" >&2
@@ -73,7 +147,7 @@ if [[ -n "$login_new" ]]; then
   if [[ ! -f "$profile_dir/.credentials.json" ]]; then
     echo "claude: profile '$login_new' has no saved login yet — run /login inside this session to sign in (only this profile is affected)." >&2
   fi
-  exec env CLAUDE_CONFIG_DIR="$profile_dir" "$REAL_CLAUDE" "${args[@]}"
+  exec env CLAUDE_CONFIG_DIR="$profile_dir" "$REAL_CLAUDE" "${final_args[@]}"
 else
-  exec "$REAL_CLAUDE" "${args[@]}"
+  exec "$REAL_CLAUDE" "${final_args[@]}"
 fi

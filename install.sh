@@ -85,8 +85,15 @@ Usage:
                                   that doesn't pass --login_new is completely
                                   unaffected, both while this one runs and
                                   after it exits.
-  claude ...                     No flag: identical to the real claude.
+  claude ...                     No flag: identical to the real claude,
+                                  plus the session defaults below.
 
 Profiles are stored under ~/.claude-profiles/<name>/ (override with
 CLAUDE_LOGIN_NEW_PROFILES_DIR).
+
+Every invocation also fills in --model sonnet, --fallback-model fable, and
+--effort medium unless you already passed them (skipped for subcommands
+like `claude mcp`/`claude plugins`/`claude auth`). Override via
+CLAUDE_LOGIN_NEW_DEFAULT_MODEL / _FALLBACK_MODEL / _EFFORT env vars.
+--plugin-dir, --plugin-url, and every other flag pass through untouched.
 EOF

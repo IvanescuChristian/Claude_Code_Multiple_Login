@@ -65,6 +65,30 @@ claude
 Profiles live under `~/.claude-profiles/<name>/` (override the base
 directory with `CLAUDE_LOGIN_NEW_PROFILES_DIR`).
 
+## Session defaults
+
+Every invocation (whether or not `--login_new` is used) gets these defaults
+filled in unless you already passed them yourself:
+
+- `--model sonnet`
+- `--fallback-model fable`
+- `--effort medium`
+
+Any explicit flag you pass wins over its default, e.g.
+`claude --login_new work --model opus` starts on Opus, not Sonnet. Defaults
+are skipped entirely for subcommands (`claude mcp ...`, `claude plugins ...`,
+`claude auth ...`, etc.) since those don't accept session flags. All other
+flags — `--plugin-dir`, `--plugin-url`, `--agent`, `--mcp-config`, and so on —
+pass through untouched, in any order, alongside `--login_new`.
+
+Override the defaults for every invocation via env vars:
+
+```sh
+export CLAUDE_LOGIN_NEW_DEFAULT_MODEL=opus
+export CLAUDE_LOGIN_NEW_DEFAULT_FALLBACK_MODEL=sonnet
+export CLAUDE_LOGIN_NEW_DEFAULT_EFFORT=high
+```
+
 ## Limitations
 
 - `--login_new` is a **launch-time** flag — it selects which profile a new
@@ -74,3 +98,11 @@ directory with `CLAUDE_LOGIN_NEW_PROFILES_DIR`).
   tool, or MCP server can reach into a running process to change which
   credentials file it's using. To switch accounts, exit and relaunch with
   `--login_new <profile>`.
+- Capping spend once you hit 100% of your plan's usage isn't something this
+  wrapper can do. "Extra usage" (overage) beyond your plan is an
+  account/org-level toggle on claude.ai, enforced server-side — there's no
+  CLI flag, env var, or local settings.json key that controls it, so a
+  shell wrapper has nothing to set. Check/change it at
+  https://claude.ai/settings/usage (or your org's admin billing settings).
+  The one client-side spend cap that does exist, `--max-budget-usd`, only
+  applies to non-interactive `--print` runs, not interactive sessions.
