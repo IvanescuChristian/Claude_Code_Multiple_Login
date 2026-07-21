@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Shadows the real `claude` binary (this dir must sit ahead of it on PATH) to
+# add a --login_new <profile> flag: runs that one invocation against an
+# isolated CLAUDE_CONFIG_DIR so it gets its own credentials.json, separate
+# from the shared ~/.claude used by every other session/agent. Nothing is
+# ever written to the shared config, so exiting leaves zero trace and every
+# other running (or future, flag-less) `claude` instance is unaffected.
+#
+# Usage:
+#   claude --login_new work            # first time: creates+uses an isolated
+#                                       # profile named "work"; run /login
+#                                       # inside it once to sign in there
+#   claude --login_new work            # later: reuses that profile's saved
+#                                       #        credentials automatically
+#   claude ...                         # no flag: behaves exactly as before
+
+set -euo pipefail
+
+PROFILES_DIR="${CLAUDE_LOGIN_NEW_PROFILES_DIR:-$HOME/.claude-profiles}"
+
+find_real_claude() {
+  local self
+  self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  local IFS=:
+  for dir in $PATH; do
+    local candidate="$dir/claude"
+    if [[ -x "$candidate" && "$candidate" != "$self" ]]; then
+      # Resolve symlinks so we never re-enter this same wrapper file.
+      if [[ "$(readlink -f "$candidate")" != "$(readlink -f "$self")" ]]; then
+        echo "$candidate"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+REAL_CLAUDE="$(find_real_claude)" || {
+  echo "claude wrapper: could not find the real claude binary on PATH (besides this wrapper)" >&2
+  exit 1
+}
+
+login_new=""
+args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --login_new|-login_new)
+      if [[ $# -lt 2 || -z "$2" ]]; then
+        echo "claude: --login_new requires a profile name, e.g. --login_new work" >&2
+        exit 1
+      fi
+      login_new="$2"
+      shift 2
+      ;;
+    --login_new=*|-login_new=*)
+      login_new="${1#*=}"
+      shift
+      ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ -n "$login_new" ]]; then
+  if [[ ! "$login_new" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "claude: invalid profile name '$login_new' (use letters, numbers, ., _, -)" >&2
+    exit 1
+  fi
+  profile_dir="$PROFILES_DIR/$login_new"
+  mkdir -p "$profile_dir"
+  if [[ ! -f "$profile_dir/.credentials.json" ]]; then
+    echo "claude: profile '$login_new' has no saved login yet — run /login inside this session to sign in (only this profile is affected)." >&2
+  fi
+  exec env CLAUDE_CONFIG_DIR="$profile_dir" "$REAL_CLAUDE" "${args[@]}"
+else
+  exec "$REAL_CLAUDE" "${args[@]}"
+fi
