@@ -73,6 +73,7 @@ filled in unless you already passed them yourself:
 - `--model sonnet`
 - `--fallback-model fable`
 - `--effort medium`
+- `--permission-mode acceptEdits`
 
 Any explicit flag you pass wins over its default, e.g.
 `claude --login_new work --model opus` starts on Opus, not Sonnet. Defaults
@@ -87,6 +88,7 @@ Override the defaults for every invocation via env vars:
 export CLAUDE_LOGIN_NEW_DEFAULT_MODEL=opus
 export CLAUDE_LOGIN_NEW_DEFAULT_FALLBACK_MODEL=sonnet
 export CLAUDE_LOGIN_NEW_DEFAULT_EFFORT=high
+export CLAUDE_LOGIN_NEW_DEFAULT_PERMISSION_MODE=default
 ```
 
 ## Limitations
