@@ -46,6 +46,27 @@ find_real_claude() {
   local self_resolved
   self_resolved="$(readlink -f "$self")"
 
+  # install.sh records the real binary's path here at install time, from
+  # before this wrapper took over the only on-PATH `claude` slot. Prefer it
+  # over a live PATH scan: once the wrapper occupies that slot, a pure
+  # native install (no separate npm/volta install alongside it) has no
+  # other on-PATH `claude` to find, so a live scan falls through to
+  # whatever `claude` happens to be reachable next — e.g. an unrelated
+  # install on a different machine/OS reached only via a WSL interop mount
+  # — and silently wraps that instead, so every profile ends up
+  # authenticating against its one account. See install.sh for how this
+  # file is produced/validated.
+  local real_bin_file
+  real_bin_file="$(dirname "$self")/.claude-real-bin"
+  if [[ -f "$real_bin_file" ]]; then
+    local recorded
+    recorded="$(<"$real_bin_file")"
+    if [[ -x "$recorded" ]] && ! cmp -s "$recorded" "$self" 2>/dev/null; then
+      echo "$recorded"
+      return 0
+    fi
+  fi
+
   local IFS=:
   for dir in $PATH; do
     local candidate="$dir/claude"

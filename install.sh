@@ -38,28 +38,75 @@ if [[ ! -f "$SOURCE_FILE" ]]; then
 fi
 
 mkdir -p "$INSTALL_DIR"
+
+# Before touching anything: if $TARGET_FILE already exists, capture what it
+# *currently* resolves to. On a native Claude Code install this is normally
+# a symlink like ~/.local/bin/claude -> ~/.local/share/claude/versions/<ver>
+# — i.e. the ONLY on-PATH reference to the real binary. `cp` onto an
+# existing path follows symlinks and overwrites whatever they point at in
+# place, so a plain `cp "$SOURCE_FILE" "$TARGET_FILE"` here would clobber
+# that real versioned binary itself, not just the symlink (this is exactly
+# what happened previously: ~/.local/share/claude/versions/2.1.215 ended up
+# byte-for-byte identical to bin/claude). Resolve and preserve that path
+# *before* removing the old entry, so we still know where the real binary
+# is even after $TARGET_FILE becomes the wrapper.
+preexisting_target=""
+if [[ -e "$TARGET_FILE" ]]; then
+  preexisting_target="$(readlink -f "$TARGET_FILE" 2>/dev/null || true)"
+fi
+
+rm -f "$TARGET_FILE"
 cp "$SOURCE_FILE" "$TARGET_FILE"
 chmod +x "$TARGET_FILE"
 echo "Installed wrapper to $TARGET_FILE"
 
-# Find the real claude binary elsewhere on PATH (ignoring the one we just installed).
+is_our_wrapper() {
+  # True if $1 is missing, not executable, or byte-identical to the wrapper
+  # source — i.e. not safe to treat as "the real claude" (either it doesn't
+  # exist, or it's itself a previous/other wrapper install, which would
+  # otherwise let us wrap a wrapper, or worse, an unrelated `claude` on a
+  # totally different machine/filesystem reached only by PATH accident).
+  [[ -x "$1" ]] || return 0
+  cmp -s "$1" "$SOURCE_FILE" 2>/dev/null
+}
+
 real_claude=""
-IFS=:
-for dir in $PATH; do
-  candidate="$dir/claude"
-  if [[ -x "$candidate" && "$(readlink -f "$candidate" 2>/dev/null)" != "$(readlink -f "$TARGET_FILE")" ]]; then
-    real_claude="$candidate"
-    break
-  fi
-done
-unset IFS
+if [[ -n "$preexisting_target" ]] && ! is_our_wrapper "$preexisting_target"; then
+  real_claude="$preexisting_target"
+fi
+
+# Fall back to a PATH scan only if $TARGET_FILE didn't already point at a
+# usable real binary (e.g. first-ever install with $INSTALL_DIR not yet on
+# PATH, so nothing was there to resolve above).
+if [[ -z "$real_claude" ]]; then
+  IFS=:
+  for dir in $PATH; do
+    candidate="$dir/claude"
+    if [[ -x "$candidate" ]] && ! is_our_wrapper "$candidate" \
+       && [[ "$(readlink -f "$candidate" 2>/dev/null)" != "$(readlink -f "$TARGET_FILE")" ]]; then
+      real_claude="$candidate"
+      break
+    fi
+  done
+  unset IFS
+fi
 
 if [[ -z "$real_claude" ]]; then
-  echo "warning: could not find an existing claude installation on PATH to wrap." >&2
+  echo "warning: could not find an existing claude installation to wrap." >&2
   echo "         Install/reinstall Claude Code, then re-run this script." >&2
   exit 0
 fi
 echo "Wrapping: $real_claude"
+
+# Record the resolved path so bin/claude doesn't have to rediscover it via a
+# live PATH scan at runtime — once $TARGET_FILE occupies the only on-PATH
+# `claude` slot, a runtime scan has nothing else to find on a pure native
+# install (no separate PATH entry for the real binary exists at all), and
+# falling back to an unrelated `claude` found elsewhere (e.g. a Windows
+# install reachable over a WSL interop mount) means every profile silently
+# authenticates against that other install's single account instead of its
+# own — the exact bug this fixes.
+printf '%s\n' "$real_claude" > "$INSTALL_DIR/.claude-real-bin"
 
 # Confirm the install dir actually wins the PATH race.
 resolved="$(command -v claude || true)"
