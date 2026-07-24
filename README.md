@@ -33,6 +33,8 @@ for writing by a `--login_new` run, so:
 
 ## Install
 
+### macOS / Linux
+
 ```sh
 ./install.sh              # installs bin/claude to ~/.local/bin (default)
 ./install.sh /some/dir    # or a custom directory on your PATH
@@ -48,7 +50,37 @@ To uninstall:
 ./install.sh --uninstall [dir]   # removes the installed wrapper
 ```
 
+### Windows
+
+```powershell
+.\install.ps1                              # installs to %USERPROFILE%\.local\bin (default)
+.\install.ps1 -InstallDir C:\some\dir      # or a custom directory
+```
+
+The installer copies `bin\claude.cmd` and `bin\claude.ps1` to the target
+directory, adds that directory to the front of your **User** PATH (never
+System PATH, and it never touches this git checkout itself), and verifies
+that `claude` now resolves to the wrapper instead of the real `claude.cmd`
+installed by npm/volta/etc. It updates the current session's PATH too, so it
+works immediately without reopening your terminal.
+
+`claude.cmd` is a thin shim (PowerShell won't implicitly run a bare `.ps1`
+for security reasons) that forwards everything to `claude.ps1`, which is the
+actual port of `bin/claude`'s logic — same `--login_new` flag, same session
+defaults, same subcommand detection, same profile-isolation guarantees, just
+using `CLAUDE_CONFIG_DIR` + `%USERPROFILE%\.claude-profiles\<name>\` instead
+of `$HOME/.claude-profiles/<name>/`.
+
+To uninstall:
+
+```powershell
+.\install.ps1 -Uninstall                       # removes from the default dir
+.\install.ps1 -Uninstall -InstallDir C:\some\dir
+```
+
 ## Usage
+
+### macOS / Linux
 
 ```sh
 # First time: creates the "work" profile and starts a session under it.
@@ -60,10 +92,52 @@ claude --login_new work
 
 # No flag: behaves exactly like the real claude, untouched.
 claude
+
+# List saved profiles, login status, and signed-in account when known.
+claude --login_new --list
+
+# Show wrapper-specific help (this flag, --list, session defaults, etc).
+claude --login_new --help
 ```
 
 Profiles live under `~/.claude-profiles/<name>/` (override the base
 directory with `CLAUDE_LOGIN_NEW_PROFILES_DIR`).
+
+### Windows
+
+Same flag, same behavior, from PowerShell or cmd.exe:
+
+```powershell
+# First time: creates the "work" profile and starts a session under it.
+# Nothing is logged in yet — run /login inside to sign in for this profile.
+claude --login_new work
+
+# Later: reuses the saved login for "work" automatically.
+claude --login_new work
+
+# Start a second, independent account side by side in another terminal —
+# the "work" session above is untouched.
+claude --login_new personal
+
+# Any other flag/subcommand still passes through, in any order:
+claude --login_new work --plugin-dir C:\path\to\plugin --effort high
+claude mcp add foo          # subcommands skip the session defaults, as usual
+
+# No flag: behaves exactly like the real claude, untouched.
+claude
+
+# List saved profiles, login status, and signed-in account when known.
+claude --login_new --list
+
+# Show wrapper-specific help (this flag, --list, session defaults, etc).
+claude --login_new --help
+```
+
+Profiles live under `%USERPROFILE%\.claude-profiles\<name>\` (override the
+base directory with `CLAUDE_LOGIN_NEW_PROFILES_DIR`). Each profile gets its
+own `.credentials.json`, so `/login` inside a `--login_new work` session only
+ever signs in that profile — every other terminal, including a plain
+`claude` with no flag, keeps using the shared default account untouched.
 
 ## Session defaults
 
@@ -85,10 +159,25 @@ pass through untouched, in any order, alongside `--login_new`.
 Override the defaults for every invocation via env vars:
 
 ```sh
+# macOS / Linux
 export CLAUDE_LOGIN_NEW_DEFAULT_MODEL=opus
 export CLAUDE_LOGIN_NEW_DEFAULT_FALLBACK_MODEL=sonnet
 export CLAUDE_LOGIN_NEW_DEFAULT_EFFORT=high
 export CLAUDE_LOGIN_NEW_DEFAULT_PERMISSION_MODE=default
+```
+
+```powershell
+# Windows — current session only
+$env:CLAUDE_LOGIN_NEW_DEFAULT_MODEL = 'opus'
+$env:CLAUDE_LOGIN_NEW_DEFAULT_FALLBACK_MODEL = 'sonnet'
+$env:CLAUDE_LOGIN_NEW_DEFAULT_EFFORT = 'high'
+$env:CLAUDE_LOGIN_NEW_DEFAULT_PERMISSION_MODE = 'default'
+
+# Windows — persist across terminals (User scope)
+[Environment]::SetEnvironmentVariable('CLAUDE_LOGIN_NEW_DEFAULT_MODEL', 'opus', 'User')
+[Environment]::SetEnvironmentVariable('CLAUDE_LOGIN_NEW_DEFAULT_FALLBACK_MODEL', 'sonnet', 'User')
+[Environment]::SetEnvironmentVariable('CLAUDE_LOGIN_NEW_DEFAULT_EFFORT', 'high', 'User')
+[Environment]::SetEnvironmentVariable('CLAUDE_LOGIN_NEW_DEFAULT_PERMISSION_MODE', 'default', 'User')
 ```
 
 ## Limitations

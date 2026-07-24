@@ -22,6 +22,9 @@
 #                                       # always win over the defaults below
 #   claude ...                         # no flag: still gets the defaults,
 #                                       # otherwise behaves exactly as before
+#   claude --login_new --list          # list saved profiles, login status,
+#                                       # and signed-in account when known
+#   claude --login_new --help          # show wrapper-specific help
 
 set -euo pipefail
 
@@ -80,6 +83,57 @@ REAL_CLAUDE="$(find_real_claude)" || {
   exit 1
 }
 
+show_profiles() {
+  if [[ ! -d "$PROFILES_DIR" ]] || [[ -z "$(ls -A "$PROFILES_DIR" 2>/dev/null)" ]]; then
+    echo "No profiles yet. Create one with: claude --login_new <name>"
+    return
+  fi
+  echo "Profiles in $PROFILES_DIR:"
+  for d in "$PROFILES_DIR"/*/; do
+    [[ -d "$d" ]] || continue
+    name="$(basename "$d")"
+    status="not logged in"
+    [[ -f "$d/.credentials.json" ]] && status="logged in"
+    account=""
+    if [[ -f "$d/.claude.json" ]]; then
+      email="$(grep -o '"emailAddress"[[:space:]]*:[[:space:]]*"[^"]*"' "$d/.claude.json" 2>/dev/null | head -1 | sed -E 's/.*:[[:space:]]*"(.*)"/\1/')"
+      display="$(grep -o '"displayName"[[:space:]]*:[[:space:]]*"[^"]*"' "$d/.claude.json" 2>/dev/null | head -1 | sed -E 's/.*:[[:space:]]*"(.*)"/\1/')"
+      if [[ -n "$email" && -n "$display" ]]; then
+        account="$email ($display)"
+      elif [[ -n "$email" ]]; then
+        account="$email"
+      fi
+    fi
+    if [[ -n "$account" ]]; then
+      printf '  %-20s %-14s  -  %s\n' "$name" "$status" "$account"
+    else
+      printf '  %-20s %s\n' "$name" "$status"
+    fi
+  done
+}
+
+show_help() {
+  cat <<EOF
+claude --login_new <profile> [claude args...]
+    Runs claude under an isolated profile (its own credentials.json),
+    without touching the shared ~/.claude used by other sessions.
+    First run: '/login' inside the session to sign in for this profile.
+
+claude --login_new --list
+    Lists saved profiles under $PROFILES_DIR, their login status, and the
+    signed-in account (email/display name) when known.
+
+claude --login_new --help
+    Shows this help.
+
+Session defaults applied to every invocation unless overridden:
+    --model $DEFAULT_MODEL  --fallback-model $DEFAULT_FALLBACK_MODEL  --effort $DEFAULT_EFFORT  --permission-mode $DEFAULT_PERMISSION_MODE
+Override via CLAUDE_LOGIN_NEW_DEFAULT_* environment variables.
+
+All other claude flags/subcommands pass through untouched.
+EOF
+}
+
 login_new=""
 args=()
 while [[ $# -gt 0 ]]; do
@@ -102,6 +156,17 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+case "$login_new" in
+  --list|-list|list)
+    show_profiles
+    exit 0
+    ;;
+  --help|-help|help)
+    show_help
+    exit 0
+    ;;
+esac
 
 # Detect a subcommand as the first non-flag token (e.g. `claude mcp add ...`);
 # session defaults don't apply to those.
