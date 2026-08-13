@@ -1,5 +1,5 @@
 src/*
-bin
-vscode
-snapshots
-alpackages
+bin/*
+vscode/*
+snapshots/*
+alpackages/*
